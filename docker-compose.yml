@@ -1,0 +1,39 @@
+# `docker compose up` runs the app on 127.0.0.1:8787 only. For network access put TLS in front:
+# Postgres: POSTGRES_PASSWORD=... PROVENANCE_DATABASE_URL=postgresql://provenance:...@postgres:5432/provenance docker compose --profile postgres up
+# `docker compose --profile tls up` adds a Caddy reverse proxy (set PROVENANCE_DOMAIN).
+services:
+  provenance:
+    build: .
+    environment:
+      PROVENANCE_DEMO: "${PROVENANCE_DEMO:-0}"
+      PROVENANCE_SCHEDULE_MINUTES: "5"
+      PROVENANCE_ANCHOR_DIR: /anchors          # mount a separate, append-only volume in production
+      PROVENANCE_TRUST_PROXY: "${PROVENANCE_TRUST_PROXY:-0}"
+      PROVENANCE_HSTS: "${PROVENANCE_HSTS:-0}"
+      PROVENANCE_METRICS_TOKEN: "${PROVENANCE_METRICS_TOKEN:-}"
+      PROVENANCE_DATABASE_URL: "${PROVENANCE_DATABASE_URL:-}"   # empty = SQLite in /data; `--profile postgres` + the URL below = Postgres
+    volumes: ["pv_data:/data", "pv_anchors:/anchors"]
+    ports: ["127.0.0.1:8787:8787"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:18
+    environment:
+      POSTGRES_USER: provenance
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}"
+      POSTGRES_DB: provenance
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes: ["pv_pg:/var/lib/postgresql"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U provenance"], interval: 5s, retries: 10}
+    restart: unless-stopped
+  caddy:
+    profiles: ["tls"]
+    image: caddy:2
+    command: caddy reverse-proxy --from ${PROVENANCE_DOMAIN:?set PROVENANCE_DOMAIN} --to provenance:8787
+    ports: ["443:443", "80:80"]
+    depends_on: [provenance]
+volumes: {pv_data: {}, pv_anchors: {}, pv_pg: {}}

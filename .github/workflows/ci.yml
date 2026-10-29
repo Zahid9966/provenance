@@ -1,0 +1,32 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy: {matrix: {python: ["3.10", "3.12", "3.14"]}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      - run: python -m unittest discover -s tests
+      - run: python -m compileall -q provenance
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env: {POSTGRES_USER: pv, POSTGRES_PASSWORD: pv, POSTGRES_DB: pv_test}
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U pv" --health-interval 5s --health-retries 10
+    env:
+      PROVENANCE_DATABASE_URL: postgresql://pv:pv@127.0.0.1:5432/pv_test?sslmode=disable   # the suite needs an empty database
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: python -m unittest discover -s tests
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t provenance .
